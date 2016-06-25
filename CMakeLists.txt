@@ -30,11 +30,11 @@ include_directories (${PROJECT_BINARY_DIR} ${PROJECT_SOURCE_DIR}/${INCL_DIR}
 )
 
 
-# Source files to build hpe-vrrpd
+# Source files to build ops-vrrpd
 
 # Rules to build ops-vrrpd
 
 # Build ops-vrrpd cli shared libraries.
 add_subdirectory(${SRC_DIR}/cli)
 
-# Rules to install hpe-vrrpd binary in rootfs
+# Rules to install ops-vrrpd binary in rootfs

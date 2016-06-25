@@ -14,7 +14,7 @@
 
 cmake_minimum_required (VERSION 2.8)
 
-set (VRRPD hpe-vrrpd)
+set (VRRPD ops-vrrpd)
 project (${VRRPD})
 
 set (INCL_DIR ${CMAKE_SOURCE_DIR}/include)
