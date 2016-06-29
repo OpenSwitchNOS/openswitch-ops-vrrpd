@@ -1382,6 +1382,221 @@ DEFUN (cli_vrrp_add_ip,
    return vrrp_cli_add_ip((char *)vty->index, argv[0], secondary);
 }
 
+DEFUN(cli_vrrp_version_func,
+      cli_vrrp_version_cmd,
+      "version <2-3>",
+      "Configures the VRRP protocol version value\n"
+      "Specifies the VRRP protocol version value\n")
+{
+   const struct ovsrec_vrrp *vr_row = NULL;
+   const struct ovsrec_port *port_row = NULL;
+   struct ovsdb_idl_txn *status_txn = NULL;
+   enum ovsdb_idl_txn_status status;
+   bool port_found = false;
+   char port_name[VRRP_MAX_PORT_NAME_LENGTH] = {0};
+   char addr_family[VRRP_MAX_ADDR_FAMILY_NAME_LENGTH] = {0};
+   int vrid;
+   int retval;
+   InetAddressType inet_type;
+   int64_t vr_version = (int64_t) atoi(argv[0]);
+   int64_t vrrp_version2 = VRRP_VERSION_2;
+   const char *vr_ctxt_name = (char *)vty->index;
+
+   retval = vrrp_get_port_name_from_vr_ctxt_name(vr_ctxt_name, port_name);
+   if (retval != 0)
+   {
+      VLOG_DBG("%s: Failed to get port name", __func__);
+      return CMD_SUCCESS;
+   }
+
+   vrid = vrrp_get_vrid_from_vr_ctxt_name(vr_ctxt_name);
+   if (!IS_VALID_VRID(vrid))
+   {
+      VLOG_DBG("%s: invalid vrid", __func__);
+      return CMD_SUCCESS;
+   }
+
+   retval = vrrp_get_addr_family_from_vr_ctxt_name(vr_ctxt_name, addr_family);
+   if (retval != 0)
+   {
+      VLOG_DBG("%s: invalid address family", __func__);
+      return CMD_SUCCESS;
+   }
+
+   inet_type = vrrp_addr_family_str_to_inet_type(addr_family);
+
+   status_txn = cli_do_config_start();
+
+   if (status_txn == NULL)
+   {
+      VLOG_ERR (OVSDB_TXN_CREATE_ERROR);
+      cli_do_config_abort (status_txn);
+      return CMD_OVSDB_FAILURE;
+   }
+
+   /* Check if the PORT is present or not. */
+   OVSREC_PORT_FOR_EACH(port_row, idl)
+   {
+     if (strcmp(port_row->name, port_name) == 0)
+     {
+        port_found = true;
+        break;
+      }
+
+   }
+
+   if (port_found)
+   {
+      /* Get the vr_row value from the vrid */
+      vr_row = vrrp_get_ovsrec_ip4_vr_with_id(port_row, vrid);
+      if (!vr_row)
+      {
+         VLOG_DBG("%s: Failed to get vr row", __func__);
+         cli_do_config_abort (status_txn);
+         return CMD_SUCCESS;
+      }
+
+      /* IPv6 VRs support only version 3 */
+      if ( (inet_type == ipv6Type) && (vr_version == vrrp_version2))
+      {
+         vty_out(vty,
+                "The value cannot be used for an IPv6 virtual router\n");
+         VLOG_DBG("%s: The value cannot be used for an IPv6 virtual router", __func__);
+         cli_do_config_abort (status_txn);
+         return CMD_SUCCESS;
+      }
+
+      ovsrec_vrrp_set_version(vr_row, &vr_version, 1);
+
+      status = cli_do_config_finish (status_txn);
+      if (status == TXN_SUCCESS || status == TXN_UNCHANGED)
+      {
+         return CMD_SUCCESS;
+      }
+      else
+      {
+         VLOG_ERR("Transaction commit failed in function=%s, line=%d",__func__,
+                  __LINE__);
+         return CMD_OVSDB_FAILURE;
+      }
+   }
+   else
+   {
+      VLOG_DBG("%s: PORT is not present", __func__);
+      cli_do_config_abort (status_txn);
+      return CMD_SUCCESS;
+   }
+
+   return CMD_SUCCESS;
+}
+
+DEFUN(cli_vrrp_no_version_func,
+      cli_vrrp_no_version_cmd,
+      "no version",
+      NO_STR
+      "Configures the VRRP protocol version value\\n")
+{
+   const struct ovsrec_vrrp *vr_row = NULL;
+   const struct ovsrec_port *port_row = NULL;
+   struct ovsdb_idl_txn *status_txn = NULL;
+   enum ovsdb_idl_txn_status status;
+   bool port_found = false;
+   char port_name[VRRP_MAX_PORT_NAME_LENGTH] = {0};
+   char addr_family[VRRP_MAX_ADDR_FAMILY_NAME_LENGTH] = {0};
+   int vrid;
+   int retval;
+   InetAddressType inet_type;
+   const char *vr_ctxt_name = (char *)vty->index;
+   int64_t vrrp_version2 = VRRP_VERSION_2;
+   int64_t vrrp_version3 = VRRP_VERSION_3;
+
+   retval = vrrp_get_port_name_from_vr_ctxt_name(vr_ctxt_name, port_name);
+   if (retval != 0)
+   {
+      VLOG_DBG("%s: Failed to get port name", __func__);
+      return CMD_SUCCESS;
+   }
+
+   vrid = vrrp_get_vrid_from_vr_ctxt_name(vr_ctxt_name);
+   if (!IS_VALID_VRID(vrid))
+   {
+      VLOG_DBG("%s: invalid vrid", __func__);
+      return CMD_SUCCESS;
+   }
+
+   retval = vrrp_get_addr_family_from_vr_ctxt_name(vr_ctxt_name, addr_family);
+   if (retval != 0)
+   {
+      VLOG_DBG("%s: invalid address family", __func__);
+      return CMD_SUCCESS;
+   }
+
+   inet_type = vrrp_addr_family_str_to_inet_type(addr_family);
+
+   status_txn = cli_do_config_start();
+
+   if (status_txn == NULL)
+   {
+      VLOG_ERR (OVSDB_TXN_CREATE_ERROR);
+      cli_do_config_abort (status_txn);
+      return CMD_OVSDB_FAILURE;
+   }
+
+   /* Check if the PORT is present or not. */
+   OVSREC_PORT_FOR_EACH(port_row, idl)
+   {
+     if (strcmp(port_row->name, port_name) == 0)
+     {
+        port_found = true;
+        break;
+      }
+
+   }
+
+   if (port_found)
+   {
+      /* Get the vr_row value from the vrid */
+      vr_row = vrrp_get_ovsrec_ip4_vr_with_id(port_row, vrid);
+      if (!vr_row)
+      {
+         VLOG_DBG("%s: Failed to get vr row", __func__);
+         cli_do_config_abort (status_txn);
+         return CMD_SUCCESS;
+      }
+
+      if (inet_type == ipv4Type)
+      {
+         /* Set verstion to 2*/
+         ovsrec_vrrp_set_version(vr_row, &vrrp_version2, 1);
+      }
+      else if (inet_type == ipv6Type)
+      {
+         /* Set verstion to 3*/
+         ovsrec_vrrp_set_version(vr_row, &vrrp_version3, 1);
+      }
+
+      status = cli_do_config_finish (status_txn);
+      if (status == TXN_SUCCESS || status == TXN_UNCHANGED)
+      {
+         return CMD_SUCCESS;
+      }
+      else
+      {
+         VLOG_ERR("Transaction commit failed in function=%s, line=%d",__func__,
+                  __LINE__);
+         return CMD_OVSDB_FAILURE;
+      }
+   }
+   else
+   {
+      VLOG_DBG("%s: PORT is not present", __func__);
+      cli_do_config_abort (status_txn);
+      return CMD_SUCCESS;
+   }
+
+   return CMD_SUCCESS;
+}
+
 DEFUN (cli_vrrp_exit_vrrp_if_mode,
        cli_vrrp_exit_vrrp_if_mode_cmd,
        "exit",
@@ -1414,6 +1629,7 @@ static void vrrp_ovsdb_init()
    ovsdb_idl_add_column(idl, &ovsrec_vrrp_col_failback_enable);
    ovsdb_idl_add_column(idl, &ovsrec_port_col_virtual_ip4_routers);
    ovsdb_idl_add_column(idl, &ovsrec_port_col_virtual_ip6_routers);
+   ovsdb_idl_add_column(idl, &ovsrec_vrrp_col_version);
 
    return;
 }
@@ -1442,6 +1658,8 @@ void cli_post_init(void)
 {
    install_element(INTERFACE_NODE, &cli_vrrp_create_vr_group_cmd);
    install_element(VRRP_IF_NODE, &cli_vrrp_add_ip_cmd);
+   install_element(VRRP_IF_NODE, &cli_vrrp_version_cmd);
+   install_element(VRRP_IF_NODE, &cli_vrrp_no_version_cmd);
    install_element(VRRP_IF_NODE, &cli_vrrp_exit_vrrp_if_mode_cmd);
    return;
 }
