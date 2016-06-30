@@ -402,6 +402,7 @@ void vrrp_ovsrec_set_defaults(const struct ovsrec_vrrp *vr_row,
    InetAddressType inet_type;
    int64_t vrrp_version2 = VRRP_VERSION_2;
    int64_t vrrp_version3 = VRRP_VERSION_3;
+   int64_t vr_priority = VRRP_DEF_BACKUP_VR_PTY;
    char *keys[2];
    int64_t int_values[2];
    bool preempt_disable = false;
@@ -431,9 +432,9 @@ void vrrp_ovsrec_set_defaults(const struct ovsrec_vrrp *vr_row,
     * set advertisement interval to 1 sec (1000 milliseconds), and
     * preempt_delay_time to 0 seconds
     */
-   keys[0] = "advertise_interval";
+   keys[0] = VRRP_TIMER_KEY_ADVERTISE_INTERVAL;
    int_values[0] = 1000;
-   keys[1] = "preempt_delay_time";
+   keys[1] = VRRP_TIMER_KEY_PREEMPT_DELAY_TIME;
    int_values[1] = 1;
    ovsrec_vrrp_set_timers(vr_row, keys, int_values,
                            ARRAY_SIZE(int_values));
@@ -446,6 +447,8 @@ void vrrp_ovsrec_set_defaults(const struct ovsrec_vrrp *vr_row,
    ovsrec_vrrp_set_failback_enable(vr_row, &failback_enable, 1);
    /* set admin enable to false */
    ovsrec_vrrp_set_admin_enable(vr_row, &admin_enable, 1);
+   /* set VRRP group priority, default value is 100 */
+   ovsrec_vrrp_set_priority(vr_row, &vr_priority, 1);
 }
 
 /**PROC+**********************************************************************
@@ -1442,7 +1445,6 @@ DEFUN(cli_vrrp_version_func,
         port_found = true;
         break;
       }
-
    }
 
    if (port_found)
@@ -1550,7 +1552,6 @@ DEFUN(cli_vrrp_no_version_func,
         port_found = true;
         break;
       }
-
    }
 
    if (port_found)
@@ -1574,6 +1575,568 @@ DEFUN(cli_vrrp_no_version_func,
          /* Set verstion to 3*/
          ovsrec_vrrp_set_version(vr_row, &vrrp_version3, 1);
       }
+
+      status = cli_do_config_finish (status_txn);
+      if (status == TXN_SUCCESS || status == TXN_UNCHANGED)
+      {
+         return CMD_SUCCESS;
+      }
+      else
+      {
+         VLOG_ERR("Transaction commit failed in function=%s, line=%d",__func__,
+                  __LINE__);
+         return CMD_OVSDB_FAILURE;
+      }
+   }
+   else
+   {
+      VLOG_DBG("%s: PORT is not present", __func__);
+      cli_do_config_abort (status_txn);
+      return CMD_SUCCESS;
+   }
+
+   return CMD_SUCCESS;
+}
+
+DEFUN(cli_vrrp_priority_func,
+      cli_vrrp_priority_cmd,
+      "priority <1-254>",
+      "Configures VRRP group priority\n"
+      "Specifies VRRP group priority\n")
+{
+   const struct ovsrec_vrrp *vr_row = NULL;
+   const struct ovsrec_port *port_row = NULL;
+   struct ovsdb_idl_txn *status_txn = NULL;
+   enum ovsdb_idl_txn_status status;
+   bool port_found = false;
+   char port_name[VRRP_MAX_PORT_NAME_LENGTH] = {0};
+   int vrid;
+   int retval;
+   const char *vr_ctxt_name = (char *)vty->index;
+   int64_t vr_priority = (int64_t) atoi(argv[0]);
+
+   retval = vrrp_get_port_name_from_vr_ctxt_name(vr_ctxt_name, port_name);
+   if (retval != 0)
+   {
+      VLOG_DBG("%s: Failed to get port name", __func__);
+      return CMD_SUCCESS;
+   }
+
+   vrid = vrrp_get_vrid_from_vr_ctxt_name(vr_ctxt_name);
+   if (!IS_VALID_VRID(vrid))
+   {
+      VLOG_DBG("%s: invalid vrid", __func__);
+      return CMD_SUCCESS;
+   }
+
+   status_txn = cli_do_config_start();
+
+   if (status_txn == NULL)
+   {
+      VLOG_ERR (OVSDB_TXN_CREATE_ERROR);
+      cli_do_config_abort (status_txn);
+      return CMD_OVSDB_FAILURE;
+   }
+
+   /* Check if the PORT is present or not. */
+   OVSREC_PORT_FOR_EACH(port_row, idl)
+   {
+     if (strcmp(port_row->name, port_name) == 0)
+     {
+        port_found = true;
+        break;
+      }
+   }
+
+   if (port_found)
+   {
+      /* Get the vr_row value from the vrid */
+      vr_row = vrrp_get_ovsrec_ip4_vr_with_id(port_row, vrid);
+      if (!vr_row)
+      {
+         VLOG_DBG("%s: Failed to get vr row", __func__);
+         cli_do_config_abort (status_txn);
+         return CMD_SUCCESS;
+      }
+
+      ovsrec_vrrp_set_priority(vr_row, &vr_priority, 1);
+
+      status = cli_do_config_finish (status_txn);
+      if (status == TXN_SUCCESS || status == TXN_UNCHANGED)
+      {
+         return CMD_SUCCESS;
+      }
+      else
+      {
+         VLOG_ERR("Transaction commit failed in function=%s, line=%d",__func__,
+                  __LINE__);
+         return CMD_OVSDB_FAILURE;
+      }
+   }
+   else
+   {
+      VLOG_DBG("%s: PORT is not present", __func__);
+      cli_do_config_abort (status_txn);
+      return CMD_SUCCESS;
+   }
+
+   return CMD_SUCCESS;
+}
+
+DEFUN(cli_vrrp_no_priority_func,
+      cli_vrrp_no_priority_cmd,
+      "no priority",
+      NO_STR
+      "Configures VRRP group priority\n")
+{
+   const struct ovsrec_vrrp *vr_row = NULL;
+   const struct ovsrec_port *port_row = NULL;
+   struct ovsdb_idl_txn *status_txn = NULL;
+   enum ovsdb_idl_txn_status status;
+   bool port_found = false;
+   char port_name[VRRP_MAX_PORT_NAME_LENGTH] = {0};
+   int vrid;
+   int retval;
+   const char *vr_ctxt_name = (char *)vty->index;
+   int64_t vr_priority = VRRP_DEF_BACKUP_VR_PTY;
+
+   retval = vrrp_get_port_name_from_vr_ctxt_name(vr_ctxt_name, port_name);
+   if (retval != 0)
+   {
+      VLOG_DBG("%s: Failed to get port name", __func__);
+      return CMD_SUCCESS;
+   }
+
+   vrid = vrrp_get_vrid_from_vr_ctxt_name(vr_ctxt_name);
+   if (!IS_VALID_VRID(vrid))
+   {
+      VLOG_DBG("%s: invalid vrid", __func__);
+      return CMD_SUCCESS;
+   }
+
+   status_txn = cli_do_config_start();
+
+   if (status_txn == NULL)
+   {
+      VLOG_ERR (OVSDB_TXN_CREATE_ERROR);
+      cli_do_config_abort (status_txn);
+      return CMD_OVSDB_FAILURE;
+   }
+
+   /* Check if the PORT is present or not. */
+   OVSREC_PORT_FOR_EACH(port_row, idl)
+   {
+     if (strcmp(port_row->name, port_name) == 0)
+     {
+        port_found = true;
+        break;
+      }
+   }
+
+   if (port_found)
+   {
+      /* Get the vr_row value from the vrid */
+      vr_row = vrrp_get_ovsrec_ip4_vr_with_id(port_row, vrid);
+      if (!vr_row)
+      {
+         VLOG_DBG("%s: Failed to get vr row", __func__);
+         cli_do_config_abort (status_txn);
+         return CMD_SUCCESS;
+      }
+
+      ovsrec_vrrp_set_priority(vr_row, &vr_priority, 1);
+
+      status = cli_do_config_finish (status_txn);
+      if (status == TXN_SUCCESS || status == TXN_UNCHANGED)
+      {
+         return CMD_SUCCESS;
+      }
+      else
+      {
+         VLOG_ERR("Transaction commit failed in function=%s, line=%d",__func__,
+                  __LINE__);
+         return CMD_OVSDB_FAILURE;
+      }
+   }
+   else
+   {
+      VLOG_DBG("%s: PORT is not present", __func__);
+      cli_do_config_abort (status_txn);
+      return CMD_SUCCESS;
+   }
+
+   return CMD_SUCCESS;
+}
+
+DEFUN(cli_vrrp_preempt_func,
+      cli_vrrp_preempt_cmd,
+      "preempt {delay minimum <0-3600>}",
+      "Enables preempt mode of the VRRP group\n"
+      "Configures delay timer\n"
+      "Configures minimum vaule\n"
+      "Specifies time value in seconds\n")
+{
+   const struct ovsrec_vrrp *vr_row = NULL;
+   const struct ovsrec_port *port_row = NULL;
+   struct ovsdb_idl_txn *status_txn = NULL;
+   enum ovsdb_idl_txn_status status;
+   bool port_found = false;
+   char port_name[VRRP_MAX_PORT_NAME_LENGTH] = {0};
+   int vrid;
+   int retval;
+   const char *vr_ctxt_name = (char *)vty->index;
+   bool preempt_disable = false;
+   char *keys[2];
+   int64_t int_values[2];
+
+   retval = vrrp_get_port_name_from_vr_ctxt_name(vr_ctxt_name, port_name);
+   if (retval != 0)
+   {
+      VLOG_DBG("%s: Failed to get port name", __func__);
+      return CMD_SUCCESS;
+   }
+
+   vrid = vrrp_get_vrid_from_vr_ctxt_name(vr_ctxt_name);
+   if (!IS_VALID_VRID(vrid))
+   {
+      VLOG_DBG("%s: invalid vrid", __func__);
+      return CMD_SUCCESS;
+   }
+
+   status_txn = cli_do_config_start();
+
+   if (status_txn == NULL)
+   {
+      VLOG_ERR (OVSDB_TXN_CREATE_ERROR);
+      cli_do_config_abort (status_txn);
+      return CMD_OVSDB_FAILURE;
+   }
+
+   /* Check if the PORT is present or not. */
+   OVSREC_PORT_FOR_EACH(port_row, idl)
+   {
+     if (strcmp(port_row->name, port_name) == 0)
+     {
+        port_found = true;
+        break;
+      }
+   }
+
+   if (port_found)
+   {
+      /* Get the vr_row value from the vrid */
+      vr_row = vrrp_get_ovsrec_ip4_vr_with_id(port_row, vrid);
+      if (!vr_row)
+      {
+         VLOG_DBG("%s: Failed to get vr row", __func__);
+         cli_do_config_abort (status_txn);
+         return CMD_SUCCESS;
+      }
+
+      if (argv[0] == NULL)
+      {
+         /* Only enable preempt */
+         ovsrec_vrrp_set_preempt_disable(vr_row, &preempt_disable, 1);
+      }
+      else
+      {
+         /* Only set preempt delay time */
+         keys[0] = VRRP_TIMER_KEY_ADVERTISE_INTERVAL;
+         int_values[0] = vr_row->value_timers[0];
+         keys[1] = VRRP_TIMER_KEY_PREEMPT_DELAY_TIME;
+         int_values[1] = atoi(argv[0]);
+         ovsrec_vrrp_set_timers(vr_row, keys, int_values,
+                                 ARRAY_SIZE(int_values));
+      }
+
+      status = cli_do_config_finish (status_txn);
+      if (status == TXN_SUCCESS || status == TXN_UNCHANGED)
+      {
+         return CMD_SUCCESS;
+      }
+      else
+      {
+         VLOG_ERR("Transaction commit failed in function=%s, line=%d",__func__,
+                  __LINE__);
+         return CMD_OVSDB_FAILURE;
+      }
+   }
+   else
+   {
+      VLOG_DBG("%s: PORT is not present", __func__);
+      cli_do_config_abort (status_txn);
+      return CMD_SUCCESS;
+   }
+
+   return CMD_SUCCESS;
+}
+
+DEFUN(cli_vrrp_no_preempt_func,
+      cli_vrrp_no_preempt_cmd,
+      "no preempt {delay}",
+      NO_STR
+      "Disables preempt mode of the VRRP group\n"
+      "Configures delay timer\n")
+{
+   const struct ovsrec_vrrp *vr_row = NULL;
+   const struct ovsrec_port *port_row = NULL;
+   struct ovsdb_idl_txn *status_txn = NULL;
+   enum ovsdb_idl_txn_status status;
+   bool port_found = false;
+   char port_name[VRRP_MAX_PORT_NAME_LENGTH] = {0};
+   int vrid;
+   int retval;
+   const char *vr_ctxt_name = (char *)vty->index;
+   bool preempt_disable = true;
+   char *keys[2];
+   int64_t int_values[2];
+
+   retval = vrrp_get_port_name_from_vr_ctxt_name(vr_ctxt_name, port_name);
+   if (retval != 0)
+   {
+      VLOG_DBG("%s: Failed to get port name", __func__);
+      return CMD_SUCCESS;
+   }
+
+   vrid = vrrp_get_vrid_from_vr_ctxt_name(vr_ctxt_name);
+   if (!IS_VALID_VRID(vrid))
+   {
+      VLOG_DBG("%s: invalid vrid", __func__);
+      return CMD_SUCCESS;
+   }
+
+   status_txn = cli_do_config_start();
+
+   if (status_txn == NULL)
+   {
+      VLOG_ERR (OVSDB_TXN_CREATE_ERROR);
+      cli_do_config_abort (status_txn);
+      return CMD_OVSDB_FAILURE;
+   }
+
+   /* Check if the PORT is present or not. */
+   OVSREC_PORT_FOR_EACH(port_row, idl)
+   {
+     if (strcmp(port_row->name, port_name) == 0)
+     {
+        port_found = true;
+        break;
+      }
+   }
+
+   if (port_found)
+   {
+      /* Get the vr_row value from the vrid */
+      vr_row = vrrp_get_ovsrec_ip4_vr_with_id(port_row, vrid);
+      if (!vr_row)
+      {
+         VLOG_DBG("%s: Failed to get vr row", __func__);
+         cli_do_config_abort (status_txn);
+         return CMD_SUCCESS;
+      }
+
+      if (argv[0] == NULL)
+      {
+         /* Only enable preempt */
+         ovsrec_vrrp_set_preempt_disable(vr_row, &preempt_disable, 1);
+      }
+      else
+      {
+         /* Set default preempt delay time */
+
+         keys[0] = VRRP_TIMER_KEY_ADVERTISE_INTERVAL;
+         int_values[0] = vr_row->value_timers[0];
+         keys[1] = VRRP_TIMER_KEY_PREEMPT_DELAY_TIME;
+         int_values[1] = 0;
+         ovsrec_vrrp_set_timers(vr_row, keys, int_values,
+                                 ARRAY_SIZE(int_values));
+      }
+
+      status = cli_do_config_finish (status_txn);
+      if (status == TXN_SUCCESS || status == TXN_UNCHANGED)
+      {
+         return CMD_SUCCESS;
+      }
+      else
+      {
+         VLOG_ERR("Transaction commit failed in function=%s, line=%d",__func__,
+                  __LINE__);
+         return CMD_OVSDB_FAILURE;
+      }
+   }
+   else
+   {
+      VLOG_DBG("%s: PORT is not present", __func__);
+      cli_do_config_abort (status_txn);
+      return CMD_SUCCESS;
+   }
+
+   return CMD_SUCCESS;
+}
+
+DEFUN(cli_vrrp_timers_func,
+      cli_vrrp_timers_cmd,
+      "timers advertise <100-40950>",
+      "Configures timers\n"
+      "Configures the advertisement time\n"
+      "Specifies the advertisement time in milliseconds\n")
+{
+   const struct ovsrec_vrrp *vr_row = NULL;
+   const struct ovsrec_port *port_row = NULL;
+   struct ovsdb_idl_txn *status_txn = NULL;
+   enum ovsdb_idl_txn_status status;
+   bool port_found = false;
+   char port_name[VRRP_MAX_PORT_NAME_LENGTH] = {0};
+   int vrid;
+   int retval;
+   const char *vr_ctxt_name = (char *)vty->index;
+   char *keys[2];
+   int64_t int_values[2];
+
+   retval = vrrp_get_port_name_from_vr_ctxt_name(vr_ctxt_name, port_name);
+   if (retval != 0)
+   {
+      VLOG_DBG("%s: Failed to get port name", __func__);
+      return CMD_SUCCESS;
+   }
+
+   vrid = vrrp_get_vrid_from_vr_ctxt_name(vr_ctxt_name);
+   if (!IS_VALID_VRID(vrid))
+   {
+      VLOG_DBG("%s: invalid vrid", __func__);
+      return CMD_SUCCESS;
+   }
+
+   status_txn = cli_do_config_start();
+
+   if (status_txn == NULL)
+   {
+      VLOG_ERR (OVSDB_TXN_CREATE_ERROR);
+      cli_do_config_abort (status_txn);
+      return CMD_OVSDB_FAILURE;
+   }
+
+   /* Check if the PORT is present or not. */
+   OVSREC_PORT_FOR_EACH(port_row, idl)
+   {
+     if (strcmp(port_row->name, port_name) == 0)
+     {
+        port_found = true;
+        break;
+      }
+   }
+
+   if (port_found)
+   {
+      /* Get the vr_row value from the vrid */
+      vr_row = vrrp_get_ovsrec_ip4_vr_with_id(port_row, vrid);
+      if (!vr_row)
+      {
+         VLOG_DBG("%s: Failed to get vr row", __func__);
+         cli_do_config_abort (status_txn);
+         return CMD_SUCCESS;
+      }
+
+      /* Only set advertisement time */
+      keys[0] = VRRP_TIMER_KEY_ADVERTISE_INTERVAL;
+      int_values[0] = atoi(argv[0]);
+      keys[1] = VRRP_TIMER_KEY_PREEMPT_DELAY_TIME;
+      int_values[1] = vr_row->value_timers[1];
+      ovsrec_vrrp_set_timers(vr_row, keys, int_values,
+                              ARRAY_SIZE(int_values));
+
+      status = cli_do_config_finish (status_txn);
+      if (status == TXN_SUCCESS || status == TXN_UNCHANGED)
+      {
+         return CMD_SUCCESS;
+      }
+      else
+      {
+         VLOG_ERR("Transaction commit failed in function=%s, line=%d",__func__,
+                  __LINE__);
+         return CMD_OVSDB_FAILURE;
+      }
+   }
+   else
+   {
+      VLOG_DBG("%s: PORT is not present", __func__);
+      cli_do_config_abort (status_txn);
+      return CMD_SUCCESS;
+   }
+
+   return CMD_SUCCESS;
+}
+
+DEFUN(cli_vrrp_no_timers_func,
+      cli_vrrp_no_timers_cmd,
+      "no timers advertise",
+      NO_STR
+      "Configures timers\n"
+      "Configures the advertisement time\n")
+{
+   const struct ovsrec_vrrp *vr_row = NULL;
+   const struct ovsrec_port *port_row = NULL;
+   struct ovsdb_idl_txn *status_txn = NULL;
+   enum ovsdb_idl_txn_status status;
+   bool port_found = false;
+   char port_name[VRRP_MAX_PORT_NAME_LENGTH] = {0};
+   int vrid;
+   int retval;
+   const char *vr_ctxt_name = (char *)vty->index;
+   char *keys[2];
+   int64_t int_values[2];
+
+   retval = vrrp_get_port_name_from_vr_ctxt_name(vr_ctxt_name, port_name);
+   if (retval != 0)
+   {
+      VLOG_DBG("%s: Failed to get port name", __func__);
+      return CMD_SUCCESS;
+   }
+
+   vrid = vrrp_get_vrid_from_vr_ctxt_name(vr_ctxt_name);
+   if (!IS_VALID_VRID(vrid))
+   {
+      VLOG_DBG("%s: invalid vrid", __func__);
+      return CMD_SUCCESS;
+   }
+
+   status_txn = cli_do_config_start();
+
+   if (status_txn == NULL)
+   {
+      VLOG_ERR (OVSDB_TXN_CREATE_ERROR);
+      cli_do_config_abort (status_txn);
+      return CMD_OVSDB_FAILURE;
+   }
+
+   /* Check if the PORT is present or not. */
+   OVSREC_PORT_FOR_EACH(port_row, idl)
+   {
+     if (strcmp(port_row->name, port_name) == 0)
+     {
+        port_found = true;
+        break;
+      }
+   }
+
+   if (port_found)
+   {
+      /* Get the vr_row value from the vrid */
+      vr_row = vrrp_get_ovsrec_ip4_vr_with_id(port_row, vrid);
+      if (!vr_row)
+      {
+         VLOG_DBG("%s: Failed to get vr row", __func__);
+         cli_do_config_abort (status_txn);
+         return CMD_SUCCESS;
+      }
+
+      /* Set default advertisement time */
+      keys[0] = VRRP_TIMER_KEY_ADVERTISE_INTERVAL;
+      int_values[0] = 1000;
+      keys[1] = VRRP_TIMER_KEY_PREEMPT_DELAY_TIME;
+      int_values[1] = vr_row->value_timers[1];
+      ovsrec_vrrp_set_timers(vr_row, keys, int_values,
+                              ARRAY_SIZE(int_values));
 
       status = cli_do_config_finish (status_txn);
       if (status == TXN_SUCCESS || status == TXN_UNCHANGED)
@@ -1630,7 +2193,9 @@ static void vrrp_ovsdb_init()
    ovsdb_idl_add_column(idl, &ovsrec_port_col_virtual_ip4_routers);
    ovsdb_idl_add_column(idl, &ovsrec_port_col_virtual_ip6_routers);
    ovsdb_idl_add_column(idl, &ovsrec_vrrp_col_version);
-
+   ovsdb_idl_add_column(idl, &ovsrec_vrrp_col_priority);
+   ovsdb_idl_add_column(idl, &ovsrec_vrrp_col_preempt_disable);
+   ovsdb_idl_add_column(idl, &ovsrec_vrrp_col_timers);
    return;
 }
 
@@ -1660,6 +2225,12 @@ void cli_post_init(void)
    install_element(VRRP_IF_NODE, &cli_vrrp_add_ip_cmd);
    install_element(VRRP_IF_NODE, &cli_vrrp_version_cmd);
    install_element(VRRP_IF_NODE, &cli_vrrp_no_version_cmd);
+   install_element(VRRP_IF_NODE, &cli_vrrp_priority_cmd);
+   install_element(VRRP_IF_NODE, &cli_vrrp_no_priority_cmd);
+   install_element(VRRP_IF_NODE, &cli_vrrp_preempt_cmd);
+   install_element(VRRP_IF_NODE, &cli_vrrp_no_preempt_cmd);
+   install_element(VRRP_IF_NODE, &cli_vrrp_timers_cmd);
+   install_element(VRRP_IF_NODE, &cli_vrrp_no_timers_cmd);
    install_element(VRRP_IF_NODE, &cli_vrrp_exit_vrrp_if_mode_cmd);
    return;
 }
