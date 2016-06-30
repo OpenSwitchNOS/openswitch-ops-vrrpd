@@ -79,3 +79,8 @@ typedef enum _InetAddressType
 #define VRRP_OVSDB_TXN_CREATE_ERROR "Couldn't create the OVSDB transaction.Function=%s Line=%d"
 #define VRRP_OVSDB_ROW_FETCH_ERROR  "Couldn't fetch row from the DB.Function=%s Line=%d"
 #define VRRP_OVSDB_TXN_COMMIT_ERROR "Committing transaction to DB failed.Function=%s Line=%d"
+/* VRRP timers */
+#define VRRP_TIMER_KEY_ADVERTISE_INTERVAL      "advertise_interval"
+#define VRRP_TIMER_KEY_PREEMPT_DELAY_TIME      "preempt_delay_time"
+#define VRRP_TIMER_KEY_MAX_LENGTH              80
+#define VRRP_MAX_TIMERS                        2
