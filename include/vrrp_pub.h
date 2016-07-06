@@ -82,3 +82,8 @@ typedef enum _InetAddressType
 /* VRRP timers */
 #define VRRP_TIMER_KEY_ADVERTISE_INTERVAL      "advertise_interval"
 #define VRRP_TIMER_KEY_PREEMPT_DELAY_TIME      "preempt_delay_time"
+
+#define VRRP_STATUS_KEY_STATE                "state"
+#define VRRP_STATUS_KEY_STATE_DURATION       "state_duration"
+#define VRRP_STATUS_KEY_MASTER_ROUTER        "master_router"
+#define VRRP_STATUS_KEY_IS_MASTER_LOCAL      "is_master_local"

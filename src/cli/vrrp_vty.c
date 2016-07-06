@@ -2160,6 +2160,108 @@ DEFUN(cli_vrrp_no_timers_func,
    return CMD_SUCCESS;
 }
 
+static int  cli_vrrp_set_admin_enable(const char *vr_ctxt_name,
+                                      bool admin_enable)
+{
+   const struct ovsrec_vrrp *vr_row = NULL;
+   const struct ovsrec_port *port_row = NULL;
+   struct ovsdb_idl_txn *status_txn = NULL;
+   enum ovsdb_idl_txn_status status;
+   bool port_found = false;
+   char port_name[VRRP_MAX_PORT_NAME_LENGTH] = {0};
+   int vrid;
+   int retval;
+
+   retval = vrrp_get_port_name_from_vr_ctxt_name(vr_ctxt_name, port_name);
+   if (retval != 0)
+   {
+      VLOG_DBG("%s: Failed to get port name", __func__);
+      return CMD_SUCCESS;
+   }
+
+   vrid = vrrp_get_vrid_from_vr_ctxt_name(vr_ctxt_name);
+   if (!IS_VALID_VRID(vrid))
+   {
+      VLOG_DBG("%s: invalid vrid", __func__);
+      return CMD_SUCCESS;
+   }
+
+   status_txn = cli_do_config_start();
+
+   if (status_txn == NULL)
+   {
+      VLOG_ERR (OVSDB_TXN_CREATE_ERROR);
+      cli_do_config_abort (status_txn);
+      return CMD_OVSDB_FAILURE;
+   }
+
+   /* Check if the PORT is present or not. */
+   OVSREC_PORT_FOR_EACH(port_row, idl)
+   {
+     if (strcmp(port_row->name, port_name) == 0)
+     {
+        port_found = true;
+        break;
+      }
+   }
+
+   if (port_found)
+   {
+      /* Get the vr_row value from the vrid */
+      vr_row = vrrp_get_ovsrec_ip4_vr_with_id(port_row, vrid);
+      if (!vr_row)
+      {
+         VLOG_DBG("%s: Failed to get vr row", __func__);
+         cli_do_config_abort (status_txn);
+         return CMD_SUCCESS;
+      }
+
+      /* set admin enable to false */
+      ovsrec_vrrp_set_admin_enable(vr_row, &admin_enable, 1);
+
+      status = cli_do_config_finish (status_txn);
+      if (status == TXN_SUCCESS || status == TXN_UNCHANGED)
+      {
+         return CMD_SUCCESS;
+      }
+      else
+      {
+         VLOG_ERR("Transaction commit failed in function=%s, line=%d",__func__,
+                  __LINE__);
+         return CMD_OVSDB_FAILURE;
+      }
+   }
+   else
+   {
+      VLOG_DBG("%s: PORT is not present", __func__);
+      cli_do_config_abort (status_txn);
+      return CMD_SUCCESS;
+   }
+
+   return CMD_SUCCESS;
+}
+
+DEFUN(cli_vrrp_shutdown_func,
+      cli_vrrp_shutdown_cmd,
+      "shutdown",
+      "Disables VRRP group operation\n")
+{
+   bool admin_enable = false;
+
+   return cli_vrrp_set_admin_enable((char *)vty->index, admin_enable);
+}
+
+DEFUN(cli_vrrp_no_shutdown_func,
+      cli_vrrp_no_shutdown_cmd,
+      "no shutdown",
+      NO_STR
+      "Enables VRRP group operation\n")
+{
+   bool admin_enable = true;
+
+   return cli_vrrp_set_admin_enable((char *)vty->index, admin_enable);
+}
+
 DEFUN (cli_vrrp_exit_vrrp_if_mode,
        cli_vrrp_exit_vrrp_if_mode_cmd,
        "exit",
@@ -2176,6 +2278,162 @@ DEFUN (cli_vrrp_exit_vrrp_if_mode,
 
    vty->index = port_name;
    return vtysh_exit(vty);
+}
+
+static int  cli_vrrp_show_a_vr_group(const struct ovsrec_vrrp *vr_row,
+                                     const char *port_name,
+                                     int64_t vrid,
+                                     const char *addr_family,
+                                     bool brief)
+{
+   const struct ovsrec_mac *mac_row = NULL;
+   const struct ovsrec_vrrp_track_entity *track_row = NULL;
+   const char *state = NULL, *state_duration = NULL;
+   const char *primary_address = NULL;
+   const char *master_router = NULL, *is_master_local = NULL;
+   int j = 0;
+   int duration_time = 0;
+
+   state = smap_get(&vr_row->status, VRRP_STATUS_KEY_STATE);
+   state_duration = smap_get(&vr_row->status, VRRP_STATUS_KEY_STATE_DURATION);
+   if (state_duration)
+   {
+      duration_time = atoi(state_duration);
+   }
+   primary_address = smap_get(&vr_row->ip_address, OVSREC_VRRP_IP_ADDRESS_PRIMARY);
+   master_router = smap_get(&vr_row->status, VRRP_STATUS_KEY_MASTER_ROUTER);
+   is_master_local = smap_get(&vr_row->status, VRRP_STATUS_KEY_IS_MASTER_LOCAL);
+   mac_row = vr_row->virtual_mac;
+
+   if (brief)
+   {
+      vty_out(vty, " %-11s %-3" PRId64 " %-4s %-3" PRId64 " %-5d %-5s %-3s %-7s %s %s%s",
+               port_name, vrid, addr_family, *(vr_row->priority), duration_time,
+               (is_master_local && (strcmp(is_master_local, "true") == 0))?"Y":"N",
+               *(vr_row->preempt_disable)?"N":"Y",
+               (state)?state:"INIT",
+               (master_router)?master_router:"AF-UNDEFINED",
+               (primary_address)?primary_address:"no address",
+               VTY_NEWLINE);
+   }
+   else
+   {
+      /* Display information */
+      vty_out(vty, "Interface %s - Group %" PRId64 " - Address-Family %s%s",
+              port_name, vrid, addr_family, VTY_NEWLINE);
+      vty_out(vty, "  State is %s%s",
+              (state)?state:"INIT (Interface Down)", VTY_NEWLINE);
+      vty_out(vty, "  State duration %d mins %2.3f secs%s",
+              (duration_time/60), (float)(duration_time%60), VTY_NEWLINE);
+      vty_out(vty, "  Virtual IP address is %s%s",
+              (primary_address)?primary_address:"no address", VTY_NEWLINE);
+
+      if (mac_row)
+      {
+         vty_out(vty, "  Virtual MAC address is %s%s",
+                 vr_row->virtual_mac->mac_addr, VTY_NEWLINE);
+      }
+
+      vty_out(vty, "  Advertisement interval is %" PRId64 " msec%s",
+              vr_row->value_timers[0], VTY_NEWLINE);
+      vty_out(vty, "  Preemption %s%s",
+              *(vr_row->preempt_disable)?"disabled":"enabled", VTY_NEWLINE);
+      vty_out(vty, "  Priority is %" PRId64 "%s",
+              *(vr_row->priority), VTY_NEWLINE);
+
+      if (is_master_local && (strcmp(is_master_local, "true") == 0))
+      {
+         vty_out(vty, "  Master Router is  %s (local)%s",
+                 master_router, VTY_NEWLINE);
+         vty_out(vty, "  Master Advertisement interval is %" PRId64 " msec%s",
+                 vr_row->value_timers[0], VTY_NEWLINE);
+         vty_out(vty, "  Master Down interval is %" PRId64 " msec%s",
+                 (vr_row->value_timers[0])*3,
+                 VTY_NEWLINE);
+      }
+      else
+      {
+         vty_out(vty, "  Master Router is unknown%s", VTY_NEWLINE);
+         vty_out(vty, "  Master Advertisement interval is unknown%s", VTY_NEWLINE);
+         vty_out(vty, "  Master Down interval is unknown%s", VTY_NEWLINE);
+      }
+
+      for (j = 0; j < vr_row->n_track_entities; j++)
+      {
+         track_row = vr_row->track_entities[j];
+         vty_out(vty, "  Tracked object id is %" PRId64 " and state %s%s",
+                 track_row->id, (track_row->status_up)?"Up":"Down", VTY_NEWLINE);
+      }
+      vty_out(vty, "%s", VTY_NEWLINE);
+   }
+   return CMD_SUCCESS;
+}
+
+DEFUN(cli_vrrp_show_vrrp_func,
+      cli_vrrp_show_vrrp_cmd,
+      "show vrrp",
+      SHOW_STR
+      "shows all VRRP groups information\n")
+{
+   const struct ovsrec_vrrp *vr_row = NULL;
+   const struct ovsrec_port *port_row = NULL;
+   int i = 0;
+   bool brief = false;
+
+   OVSREC_PORT_FOR_EACH(port_row, idl)
+   {
+      for (i = 0; i < port_row->n_virtual_ip4_routers; i++)
+      {
+         vr_row = port_row->value_virtual_ip4_routers[i];
+         cli_vrrp_show_a_vr_group(vr_row, port_row->name,
+                                  port_row->key_virtual_ip4_routers[i],
+                                  "IPv4", brief);
+      }
+
+      for (i = 0; i < port_row->n_virtual_ip6_routers; i++)
+      {
+         vr_row = port_row->value_virtual_ip6_routers[i];
+         cli_vrrp_show_a_vr_group(vr_row, port_row->name,
+                                  port_row->key_virtual_ip6_routers[i],
+                                  "IPv6", brief);
+      }
+   }
+   return CMD_SUCCESS;
+}
+
+DEFUN(cli_vrrp_show_vrrp_brief_func,
+      cli_vrrp_show_vrrp_brief_cmd,
+      "show vrrp brief",
+      SHOW_STR
+      "shows all VRRP groups information\n"
+      "shows brief information of all VRRP groups\n")
+{
+   const struct ovsrec_vrrp *vr_row = NULL;
+   const struct ovsrec_port *port_row = NULL;
+   int i = 0;
+   bool brief = true;
+
+   vty_out(vty, " %-11s %-3s %-4s %-3s %-5s %-5s %-3s %-7s %-40s%s",
+            "Interface", "Grp", "A-F", "Pri", "Time", "Owner", "Pre", "State", "Master addr/Group addr", VTY_NEWLINE);
+   OVSREC_PORT_FOR_EACH(port_row, idl)
+   {
+      for (i = 0; i < port_row->n_virtual_ip4_routers; i++)
+      {
+         vr_row = port_row->value_virtual_ip4_routers[i];
+         cli_vrrp_show_a_vr_group(vr_row, port_row->name,
+                                  port_row->key_virtual_ip4_routers[i],
+                                  "IPv4", brief);
+      }
+
+      for (i = 0; i < port_row->n_virtual_ip6_routers; i++)
+      {
+         vr_row = port_row->value_virtual_ip6_routers[i];
+         cli_vrrp_show_a_vr_group(vr_row, port_row->name,
+                                  port_row->key_virtual_ip6_routers[i],
+                                  "IPv6", brief);
+      }
+   }
+   return CMD_SUCCESS;
 }
 
 /*
@@ -2196,6 +2454,14 @@ static void vrrp_ovsdb_init()
    ovsdb_idl_add_column(idl, &ovsrec_vrrp_col_priority);
    ovsdb_idl_add_column(idl, &ovsrec_vrrp_col_preempt_disable);
    ovsdb_idl_add_column(idl, &ovsrec_vrrp_col_timers);
+   ovsdb_idl_add_column(idl, &ovsrec_vrrp_col_status);
+   ovsdb_idl_add_column(idl, &ovsrec_vrrp_col_virtual_mac);
+   ovsdb_idl_add_column(idl, &ovsrec_vrrp_col_track_entities);
+
+   ovsdb_idl_add_table(idl, &ovsrec_table_vrrp_track_entity);
+   ovsdb_idl_add_column(idl, &ovsrec_vrrp_track_entity_col_track_port);
+   ovsdb_idl_add_column(idl, &ovsrec_vrrp_track_entity_col_id);
+   ovsdb_idl_add_column(idl, &ovsrec_vrrp_track_entity_col_status_up);
    return;
 }
 
@@ -2231,6 +2497,10 @@ void cli_post_init(void)
    install_element(VRRP_IF_NODE, &cli_vrrp_no_preempt_cmd);
    install_element(VRRP_IF_NODE, &cli_vrrp_timers_cmd);
    install_element(VRRP_IF_NODE, &cli_vrrp_no_timers_cmd);
+   install_element(VRRP_IF_NODE, &cli_vrrp_shutdown_cmd);
+   install_element(VRRP_IF_NODE, &cli_vrrp_no_shutdown_cmd);
    install_element(VRRP_IF_NODE, &cli_vrrp_exit_vrrp_if_mode_cmd);
+   install_element(ENABLE_NODE, &cli_vrrp_show_vrrp_cmd);
+   install_element(ENABLE_NODE, &cli_vrrp_show_vrrp_brief_cmd);
    return;
 }
