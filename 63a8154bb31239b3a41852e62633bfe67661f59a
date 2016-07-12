@@ -1,0 +1,8 @@
+Code-Review+2: Ramaprasad Allu <ramprasad.na@hpe.com>
+Verified+2: chenkelly <kelly_chen@accton.com.tw>
+Workflow+1: chenkelly <kelly_chen@accton.com.tw>
+Submitted-by: chenkelly <kelly_chen@accton.com.tw>
+Submitted-at: Tue, 12 Jul 2016 01:40:28 +0000
+Reviewed-on: https://review.openswitch.net/11719
+Project: openswitch/ops-vrrpd
+Branch: refs/heads/feature/vrrp
