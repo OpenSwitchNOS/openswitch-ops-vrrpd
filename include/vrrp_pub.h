@@ -83,7 +83,65 @@ typedef enum _InetAddressType
 #define VRRP_TIMER_KEY_ADVERTISE_INTERVAL      "advertise_interval"
 #define VRRP_TIMER_KEY_PREEMPT_DELAY_TIME      "preempt_delay_time"
 
-#define VRRP_STATUS_KEY_STATE                "state"
-#define VRRP_STATUS_KEY_STATE_DURATION       "state_duration"
-#define VRRP_STATUS_KEY_MASTER_ROUTER        "master_router"
-#define VRRP_STATUS_KEY_IS_MASTER_LOCAL      "is_master_local"
+#define VRRP_STATUS_KEY_STATE                            "state"
+#define VRRP_STATUS_KEY_STATE_DURATION                   "state_duration"
+#define VRRP_STATUS_KEY_MASTER_ROUTER                    "master_router"
+#define VRRP_STATUS_KEY_IS_MASTER_LOCAL                  "is_master_local"
+#define VRRP_STATUS_KEY_INIT_TO_MASTER_LAST_CHANGE       "init_to_master_last_change"
+#define VRRP_STATUS_KEY_INIT_TO_BACKUP_LAST_CHANGE       "init_to_backup_last_change"
+#define VRRP_STATUS_KEY_MASTER_TO_BACKUP_LAST_CHANGE     "master_to_backup_last_change"
+#define VRRP_STATUS_KEY_BACKUP_TO_MASTER_LAST_CHANGE     "backup_to_master_last_change"
+#define VRRP_STATUS_KEY_MASTER_TO_INIT_LAST_CHANGE       "master_to_init_last_change"
+#define VRRP_STATUS_KEY_BACKUP_TO_INIT_LAST_CHANGE       "backup_to_init_last_change"
+
+typedef enum _VrrpStatsKey
+{
+   VRRP_STATS_KEY_V3_TX = 0,
+   VRRP_STATS_KEY_V3_RX,
+   VRRP_STATS_KEY_V2_TX,
+   VRRP_STATS_KEY_V2_RX,
+   VRRP_STATS_KEY_ZERO_PRIORITY_RX,
+   VRRP_STATS_KEY_ZERO_PRIORITY_TX,
+   VRRP_STATS_KEY_V2_INCOMPATIBILITY,
+   VRRP_STATS_KEY_MISMATCHED_ADDR_LIST_PKTS,
+   VRRP_STATS_KEY_MISMATCHED_AUTH_TYPE_PKTS,
+   VRRP_STATS_KEY_IP_ADDRESS_OWNER_CONFLICTS,
+   VRRP_STATS_KEY_ADVERTISE_INTERVAL_ERRORS,
+   VRRP_STATS_KEY_ADVERTISE_RECV_IN_INIT_STATE,
+   VRRP_STATS_KEY_INVALID_GROUP,
+   VRRP_STATS_KEY_OTHER_REASONS,
+   VRRP_STATS_KEY_NEAR_FAILOVERS,
+   VRRP_STATS_KEY_INIT_TO_MASTER,
+   VRRP_STATS_KEY_INIT_TO_BACKUP,
+   VRRP_STATS_KEY_BACKUP_TO_MASTER,
+   VRRP_STATS_KEY_MASTER_TO_BACKUP,
+   VRRP_STATS_KEY_MASTER_TO_INIT,
+   VRRP_STATS_KEY_BACKUP_TO_INIT,
+   VRRP_STATS_KEY_UNKNOWN
+} VrrpStatsKey;
+
+#define VRRP_KEY_NUM VRRP_STATS_KEY_UNKNOWN
+
+const char *const vrrp_stats_keys[VRRP_KEY_NUM] = {
+   [VRRP_STATS_KEY_V3_TX] =                        "vrrpv3_advertisement_tx",
+   [VRRP_STATS_KEY_V3_RX] =                        "vrrpv3_advertisement_rx",
+   [VRRP_STATS_KEY_V2_TX] =                        "vrrpv2_advertisement_tx",
+   [VRRP_STATS_KEY_V2_RX] =                        "vrrpv2_advertisement_rx",
+   [VRRP_STATS_KEY_ZERO_PRIORITY_RX] =             "zero_priority_rx",
+   [VRRP_STATS_KEY_ZERO_PRIORITY_TX] =             "zero_priority_tx",
+   [VRRP_STATS_KEY_V2_INCOMPATIBILITY] =           "vrrpv2_incompatibility",
+   [VRRP_STATS_KEY_MISMATCHED_ADDR_LIST_PKTS] =    "mismatched_addr_list_pkts",
+   [VRRP_STATS_KEY_MISMATCHED_AUTH_TYPE_PKTS] =    "mismatched_auth_type_pkts",
+   [VRRP_STATS_KEY_IP_ADDRESS_OWNER_CONFLICTS] =   "ip_address_owner_conflicts",
+   [VRRP_STATS_KEY_ADVERTISE_INTERVAL_ERRORS] =    "advertise_interval_errors",
+   [VRRP_STATS_KEY_ADVERTISE_RECV_IN_INIT_STATE] = "advertise_recv_in_init_state",
+   [VRRP_STATS_KEY_INVALID_GROUP] =                "invalid_group",
+   [VRRP_STATS_KEY_OTHER_REASONS] =                "other_reasons",
+   [VRRP_STATS_KEY_NEAR_FAILOVERS] =               "near_failovers",
+   [VRRP_STATS_KEY_INIT_TO_MASTER] =               "init_to_master",
+   [VRRP_STATS_KEY_INIT_TO_BACKUP] =               "init_to_backup",
+   [VRRP_STATS_KEY_BACKUP_TO_MASTER] =             "backup_to_master",
+   [VRRP_STATS_KEY_MASTER_TO_BACKUP] =             "master_to_backup",
+   [VRRP_STATS_KEY_MASTER_TO_INIT] =               "master_to_init",
+   [VRRP_STATS_KEY_BACKUP_TO_INIT] =               "backup_to_init"
+};
