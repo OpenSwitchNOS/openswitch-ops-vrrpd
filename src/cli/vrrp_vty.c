@@ -54,6 +54,8 @@ int vrrp_max_vrs_per_router = 0;
 
 VLOG_DEFINE_THIS_MODULE(vtysh_vrrpp_cli);
 
+#define BUF_SIZE 100
+
 static struct cmd_node vrrp_if_node =
 {
   VRRP_IF_NODE,
@@ -2262,6 +2264,374 @@ DEFUN(cli_vrrp_no_shutdown_func,
    return cli_vrrp_set_admin_enable((char *)vty->index, admin_enable);
 }
 
+static const struct ovsrec_vrrp_track_entity *
+vrrp_get_ovsrec_vrrp_track_entity_with_id(int64_t id)
+{
+   const struct ovsrec_vrrp_track_entity *track_row = NULL;
+
+   /* Check if the track is present or not. */
+   OVSREC_VRRP_TRACK_ENTITY_FOR_EACH(track_row, idl)
+   {
+      if (track_row->id == id)
+      {
+         return track_row;
+      }
+   }
+   return NULL;
+}
+
+DEFUN(cli_track_vr_group_func,
+      cli_track_vr_group_cmd,
+      "track <1-500>",
+      "Configures track ID\n"
+      "Specifies track ID\n")
+{
+   const struct ovsrec_vrrp *vr_row = NULL;
+   const struct ovsrec_port *port_row = NULL;
+   const struct ovsrec_vrrp_track_entity *track_row = NULL;
+   struct ovsdb_idl_txn *status_txn = NULL;
+   enum ovsdb_idl_txn_status status;
+   bool port_found = false;
+   bool tid_found = false;
+   char port_name[VRRP_MAX_PORT_NAME_LENGTH] = {0};
+   int vrid;
+   int retval;
+   int i;
+   int64_t track_id = (int64_t) atoi(argv[0]);
+   struct ovsrec_vrrp_track_entity **track_entities = NULL;
+   const char *vr_ctxt_name = (char *)vty->index;
+
+   retval = vrrp_get_port_name_from_vr_ctxt_name(vr_ctxt_name, port_name);
+   if (retval != 0)
+   {
+      VLOG_DBG("%s: Failed to get port name", __func__);
+      return CMD_SUCCESS;
+   }
+
+   vrid = vrrp_get_vrid_from_vr_ctxt_name(vr_ctxt_name);
+   if (!IS_VALID_VRID(vrid))
+   {
+      VLOG_DBG("%s: invalid vrid", __func__);
+      return CMD_SUCCESS;
+   }
+
+   status_txn = cli_do_config_start();
+
+   if (status_txn == NULL)
+   {
+      VLOG_ERR (OVSDB_TXN_CREATE_ERROR);
+      cli_do_config_abort (status_txn);
+      return CMD_OVSDB_FAILURE;
+   }
+
+   /* Check if the PORT is present or not. */
+   OVSREC_PORT_FOR_EACH(port_row, idl)
+   {
+     if (strcmp(port_row->name, port_name) == 0)
+     {
+        port_found = true;
+        break;
+      }
+   }
+
+   if (port_found)
+   {
+      /* Get the vr_row value from the vrid */
+      vr_row = vrrp_get_ovsrec_ip4_vr_with_id(port_row, vrid);
+      if (!vr_row)
+      {
+         VLOG_DBG("%s: Failed to get vr row", __func__);
+         cli_do_config_abort (status_txn);
+         return CMD_SUCCESS;
+      }
+
+      /* Check if the track ID is present or not. */
+      track_row = vrrp_get_ovsrec_vrrp_track_entity_with_id(track_id);
+      if(track_row == NULL)
+      {
+         cli_do_config_abort (status_txn);
+         return CMD_SUCCESS;
+      }
+
+      /* Check if the track ID is present or not. */
+      for (i = 0; i < vr_row->n_track_entities; i++)
+      {
+        if (vr_row->track_entities[i]->id == track_id)
+        {
+           tid_found = true;
+           break;
+         }
+      }
+
+      if (tid_found)
+      {
+         cli_do_config_abort (status_txn);
+         return CMD_SUCCESS;
+      }
+
+      track_entities = xmalloc (sizeof *vr_row->track_entities *
+                                (vr_row->n_track_entities + 1));
+
+      for (i = 0; i < vr_row->n_track_entities; i++)
+      {
+         track_entities[i] = vr_row->track_entities[i];
+      }
+
+      track_entities[vr_row->n_track_entities] = track_row;
+      ovsrec_vrrp_set_track_entities(vr_row, track_entities,
+           vr_row->n_track_entities + 1);
+      free (track_entities);
+
+      status = cli_do_config_finish (status_txn);
+      if (status == TXN_SUCCESS || status == TXN_UNCHANGED)
+      {
+         return CMD_SUCCESS;
+      }
+      else
+      {
+         VLOG_ERR("Transaction commit failed in function=%s, line=%d",__func__,
+                  __LINE__);
+         return CMD_OVSDB_FAILURE;
+      }
+   }
+   else
+   {
+      VLOG_DBG("%s: PORT is not present", __func__);
+      cli_do_config_abort (status_txn);
+      return CMD_SUCCESS;
+   }
+
+   return CMD_SUCCESS;
+}
+
+DEFUN(cli_no_track_vr_group_func,
+      cli_no_track_vr_group_cmd,
+      "no track <1-500>",
+      NO_STR
+      "Configures track ID\n"
+      "Specifies track ID\n")
+{
+   const struct ovsrec_vrrp *vr_row = NULL;
+   const struct ovsrec_port *port_row = NULL;
+   const struct ovsrec_vrrp_track_entity *track_row = NULL;
+   struct ovsdb_idl_txn *status_txn = NULL;
+   enum ovsdb_idl_txn_status status;
+   bool port_found = false;
+   bool tid_found = false;
+   char port_name[VRRP_MAX_PORT_NAME_LENGTH] = {0};
+   int vrid;
+   int retval;
+   int i, n;
+   int64_t track_id = (int64_t) atoi(argv[0]);
+   struct ovsrec_vrrp_track_entity **track_entities = NULL;
+   const char *vr_ctxt_name = (char *)vty->index;
+
+   retval = vrrp_get_port_name_from_vr_ctxt_name(vr_ctxt_name, port_name);
+   if (retval != 0)
+   {
+      VLOG_DBG("%s: Failed to get port name", __func__);
+      return CMD_SUCCESS;
+   }
+
+   vrid = vrrp_get_vrid_from_vr_ctxt_name(vr_ctxt_name);
+   if (!IS_VALID_VRID(vrid))
+   {
+      VLOG_DBG("%s: invalid vrid", __func__);
+      return CMD_SUCCESS;
+   }
+
+   status_txn = cli_do_config_start();
+
+   if (status_txn == NULL)
+   {
+      VLOG_ERR (OVSDB_TXN_CREATE_ERROR);
+      cli_do_config_abort (status_txn);
+      return CMD_OVSDB_FAILURE;
+   }
+
+   /* Check if the PORT is present or not. */
+   OVSREC_PORT_FOR_EACH(port_row, idl)
+   {
+     if (strcmp(port_row->name, port_name) == 0)
+     {
+        port_found = true;
+        break;
+      }
+   }
+
+   if (port_found)
+   {
+      /* Get the vr_row value from the vrid */
+      vr_row = vrrp_get_ovsrec_ip4_vr_with_id(port_row, vrid);
+      if (!vr_row)
+      {
+         VLOG_DBG("%s: Failed to get vr row", __func__);
+         cli_do_config_abort (status_txn);
+         return CMD_SUCCESS;
+      }
+
+      /* Check if the track ID is present or not. */
+      track_row = vrrp_get_ovsrec_vrrp_track_entity_with_id(track_id);
+      if(track_row == NULL)
+      {
+         cli_do_config_abort (status_txn);
+         return CMD_SUCCESS;
+      }
+
+      track_entities = xmalloc (sizeof *vr_row->track_entities *
+                                (vr_row->n_track_entities - 1));
+
+      for (i = n = 0; i < vr_row->n_track_entities; i++)
+      {
+         if (vr_row->track_entities[i]->id != track_id)
+         {
+            track_entities[n++] = vr_row->track_entities[i];
+         }
+      }
+      ovsrec_vrrp_set_track_entities(vr_row, track_entities, n);
+      free (track_entities);
+
+      status = cli_do_config_finish (status_txn);
+      if (status == TXN_SUCCESS || status == TXN_UNCHANGED)
+      {
+         return CMD_SUCCESS;
+      }
+      else
+      {
+         VLOG_ERR("Transaction commit failed in function=%s, line=%d",__func__,
+                  __LINE__);
+         return CMD_OVSDB_FAILURE;
+      }
+   }
+   else
+   {
+      VLOG_DBG("%s: PORT is not present", __func__);
+      cli_do_config_abort (status_txn);
+      return CMD_SUCCESS;
+   }
+
+   return CMD_SUCCESS;
+}
+
+DEFUN(cli_track_intf_func,
+      cli_track_intf_cmd,
+      "track <1-500> interface IFNAME",
+      "Configures trackobject\n"
+      "Specifies track object ID\n"
+      "Configures interface\n"
+      "Specifies interface's name\n")
+{
+   const struct ovsrec_port *port_row = NULL;
+   const struct ovsrec_vrrp_track_entity *track_row = NULL;
+   struct ovsdb_idl_txn *status_txn = NULL;
+   enum ovsdb_idl_txn_status status;
+   int64_t track_id = (int64_t) atoi(argv[0]);
+
+   status_txn = cli_do_config_start();
+   if (status_txn == NULL)
+   {
+      VLOG_ERR (OVSDB_TXN_CREATE_ERROR);
+      cli_do_config_abort (status_txn);
+      return CMD_OVSDB_FAILURE;
+   }
+
+   /* Check if the track ID is present or not. */
+   track_row = vrrp_get_ovsrec_vrrp_track_entity_with_id(track_id);
+   if(track_row)
+   {
+      if (strcmp(track_row->track_port->name, argv[1]) != 0)
+      {
+         vty_out(vty,
+                "Another interface %s is already using this track ID\n",
+                 track_row->track_port->name);
+      }
+      cli_do_config_abort (status_txn);
+      return CMD_SUCCESS;
+   }
+
+   /* Check if the port is present or not. */
+   port_row = vrrp_get_ovsrec_port_with_name(argv[1]);
+   if(port_row == NULL)
+   {
+      vty_out(vty,
+             "Interface %s is not created.\n",
+              argv[1]);
+      cli_do_config_abort(status_txn);
+      return CMD_SUCCESS;
+   }
+
+   track_row = ovsrec_vrrp_track_entity_insert(status_txn);
+
+   if (track_row == NULL)
+   {
+      VLOG_DBG("Row insertion failed by %s. Function=%s, Line=%d",
+               "ovsrec_vrrp_track_entity_insert", __func__, __LINE__);
+      cli_do_config_abort(status_txn);
+      return CMD_OVSDB_FAILURE;
+   }
+
+   ovsrec_vrrp_track_entity_set_id(track_row, track_id);
+   ovsrec_vrrp_track_entity_set_track_port(track_row, port_row);
+
+   status = cli_do_config_finish(status_txn);
+   if(status == TXN_SUCCESS || status == TXN_UNCHANGED)
+   {
+      return CMD_SUCCESS;
+   }
+   else
+   {
+      VLOG_ERR("Transaction commit failed in function=%s, line=%d",__func__,__LINE__);
+      return CMD_OVSDB_FAILURE;
+   }
+
+   return CMD_SUCCESS;
+}
+
+
+DEFUN(cli_no_track_func,
+      cli_no_track_cmd,
+      "no track <1-500>",
+      NO_STR
+      "Configures track object\n"
+      "Specifies track object ID\n")
+{
+   const struct ovsrec_vrrp_track_entity *track_row = NULL;
+   struct ovsdb_idl_txn *status_txn = NULL;
+   enum ovsdb_idl_txn_status status;
+   int64_t track_id = (int64_t) atoi(argv[0]);
+
+   status_txn = cli_do_config_start();
+   if (status_txn == NULL)
+   {
+      VLOG_ERR (OVSDB_TXN_CREATE_ERROR);
+      cli_do_config_abort (status_txn);
+      return CMD_OVSDB_FAILURE;
+   }
+
+   /* Check if the track ID is present or not. */
+   track_row = vrrp_get_ovsrec_vrrp_track_entity_with_id(track_id);
+   if(track_row == NULL)
+   {
+      VLOG_DBG("%s: Track object is not present", __func__);
+      cli_do_config_abort (status_txn);
+      return CMD_SUCCESS;
+   }
+
+   ovsrec_vrrp_track_entity_delete(track_row);
+   status = cli_do_config_finish(status_txn);
+   if(status == TXN_SUCCESS || status == TXN_UNCHANGED)
+   {
+      return CMD_SUCCESS;
+   }
+   else
+   {
+      VLOG_ERR("Transaction commit failed in function=%s, line=%d",__func__,__LINE__);
+      return CMD_OVSDB_FAILURE;
+   }
+
+   return CMD_SUCCESS;
+}
+
 DEFUN (cli_vrrp_exit_vrrp_if_mode,
        cli_vrrp_exit_vrrp_if_mode_cmd,
        "exit",
@@ -2373,7 +2743,7 @@ DEFUN(cli_vrrp_show_vrrp_func,
       cli_vrrp_show_vrrp_cmd,
       "show vrrp",
       SHOW_STR
-      "shows all VRRP groups information\n")
+      "Shows all VRRP groups information\n")
 {
    const struct ovsrec_vrrp *vr_row = NULL;
    const struct ovsrec_port *port_row = NULL;
@@ -2405,8 +2775,8 @@ DEFUN(cli_vrrp_show_vrrp_brief_func,
       cli_vrrp_show_vrrp_brief_cmd,
       "show vrrp brief",
       SHOW_STR
-      "shows all VRRP groups information\n"
-      "shows brief information of all VRRP groups\n")
+      "Shows all VRRP groups information\n"
+      "Shows brief information of all VRRP groups\n")
 {
    const struct ovsrec_vrrp *vr_row = NULL;
    const struct ovsrec_port *port_row = NULL;
@@ -2436,6 +2806,498 @@ DEFUN(cli_vrrp_show_vrrp_brief_func,
    return CMD_SUCCESS;
 }
 
+/* Function to get the statistics from vrrp table. */
+static int64_t vrrp_get_stats_by_key(const struct ovsrec_vrrp *vr_row,
+                                     const char *key)
+{
+   int i = 0;
+
+   for (i = 0; i <vr_row->n_statistics; i++) {
+      if (!strcmp(vr_row->key_statistics[i], key))
+         return vr_row->value_statistics[i];
+   }
+   return 0;
+}
+
+/* Function to get the last change time of state transition. */
+static void vrrp_get_last_change_time(const char *in_time,
+                                      const char *out_time)
+{
+   char tmp_buf[BUF_SIZE]={0};
+   int64_t int_time;
+   int ms_time;
+   time_t time;
+   struct tm *tm;
+
+   int_time = strtoll(in_time, NULL, 10);
+   ms_time = int_time%1000;
+   time = (time_t)(int_time/1000);
+   tm = gmtime(&time);
+
+    /* Last change %a %b %d %H:%M:%S.03d UTC*/
+    strftime(tmp_buf, sizeof(tmp_buf), "%a %b %d %H:%M:%S", tm);
+    snprintf((char *)out_time, BUF_SIZE, "Last change %s.%03d UTC", tmp_buf, ms_time);
+    return;
+}
+
+/* Function to show vrrp information for specific interface. */
+static int vrrp_show_intf(const struct ovsrec_vrrp *vr_row,
+                          const char *port_name,
+                          int64_t vrid,
+                          const char *addr_family)
+{
+   const struct ovsrec_mac *mac_row = NULL;
+   const char *state = NULL, *state_duration = NULL;
+   const char *primary_address = NULL;
+   const char *master_router = NULL, *is_master_local = NULL;
+   int duration_time = 0;
+
+   state = smap_get(&vr_row->status, VRRP_STATUS_KEY_STATE);
+   state_duration = smap_get(&vr_row->status, VRRP_STATUS_KEY_STATE_DURATION);
+   if (state_duration)
+   {
+      duration_time = atoi(state_duration);
+   }
+   primary_address = smap_get(&vr_row->ip_address, OVSREC_VRRP_IP_ADDRESS_PRIMARY);
+   master_router = smap_get(&vr_row->status, VRRP_STATUS_KEY_MASTER_ROUTER);
+   is_master_local = smap_get(&vr_row->status, VRRP_STATUS_KEY_IS_MASTER_LOCAL);
+   mac_row = vr_row->virtual_mac;
+
+   /* Display information */
+   vty_out(vty, "Interface %s - Group %" PRId64 " - Address-Family %s%s",
+           port_name, vrid, addr_family, VTY_NEWLINE);
+   vty_out(vty, "  State is %s%s",
+           (state)?state:"INIT (Interface Down)", VTY_NEWLINE);
+   vty_out(vty, "  State duration %d mins %2.3f secs%s",
+           (duration_time/60), (float)(duration_time%60), VTY_NEWLINE);
+   vty_out(vty, "  Virtual IP address is %s%s",
+           (primary_address)?primary_address:"no address", VTY_NEWLINE);
+
+   if (mac_row)
+   {
+      vty_out(vty, "  Virtual MAC address is %s%s",
+              vr_row->virtual_mac->mac_addr, VTY_NEWLINE);
+   }
+
+   vty_out(vty, "  Advertisement interval is %" PRId64 " msec%s",
+           vr_row->value_timers[0], VTY_NEWLINE);
+   vty_out(vty, "  Preemption %s%s",
+           *(vr_row->preempt_disable)?"disabled":"enabled", VTY_NEWLINE);
+   vty_out(vty, "  Version is %" PRId64 "%s",
+           *(vr_row->version), VTY_NEWLINE);
+   vty_out(vty, "  Priority is %" PRId64 "%s",
+           *(vr_row->priority), VTY_NEWLINE);
+
+   if (is_master_local && (strcmp(is_master_local, "true") == 0))
+   {
+      vty_out(vty, "  Master Router is  %s (local)%s",
+              master_router, VTY_NEWLINE);
+      vty_out(vty, "  Master Advertisement interval is %" PRId64 " msec%s",
+              vr_row->value_timers[0], VTY_NEWLINE);
+      vty_out(vty, "  Master Down interval is %" PRId64 " msec%s",
+              (vr_row->value_timers[0])*3,
+              VTY_NEWLINE);
+   }
+   else
+   {
+      vty_out(vty, "  Master Router is unknown%s", VTY_NEWLINE);
+      vty_out(vty, "  Master Advertisement interval is unknown%s", VTY_NEWLINE);
+      vty_out(vty, "  Master Down interval is unknown%s", VTY_NEWLINE);
+   }
+
+   return CMD_SUCCESS;
+}
+
+/* Function to show vrrp statistics information for specific interface. */
+static int vrrp_show_stats_intf(const struct ovsrec_vrrp *vr_row,
+                                const char *port_name,
+                                int64_t vrid,
+                                const char *addr_family)
+{
+   const char *init_to_master = NULL, *init_to_backup = NULL;
+   const char *master_to_backup = NULL, *master_to_init = NULL;
+   const char *backup_to_master = NULL, *backup_to_init = NULL;
+   int i = 0;
+   int64_t stats_value[VRRP_STATS_KEY_UNKNOWN] = {0};
+   const char time_buf[BUF_SIZE]={0};
+
+   init_to_master = smap_get(&vr_row->status, VRRP_STATUS_KEY_INIT_TO_MASTER_LAST_CHANGE);
+   init_to_backup = smap_get(&vr_row->status, VRRP_STATUS_KEY_INIT_TO_BACKUP_LAST_CHANGE);
+   master_to_backup = smap_get(&vr_row->status, VRRP_STATUS_KEY_MASTER_TO_BACKUP_LAST_CHANGE);
+   master_to_init = smap_get(&vr_row->status, VRRP_STATUS_KEY_MASTER_TO_INIT_LAST_CHANGE);
+   backup_to_master = smap_get(&vr_row->status, VRRP_STATUS_KEY_BACKUP_TO_MASTER_LAST_CHANGE);
+   backup_to_init = smap_get(&vr_row->status, VRRP_STATUS_KEY_BACKUP_TO_INIT_LAST_CHANGE);
+
+   for (i = 0; i < VRRP_STATS_KEY_UNKNOWN; i++)
+   {
+      stats_value[i] = vrrp_get_stats_by_key(vr_row, vrrp_stats_keys[i]);
+   }
+
+   /* Display information */
+   vty_out(vty, "  VRRPv3 Advertisements: sent %"PRId64"(error %"PRId64") - rcvd %"PRId64"%s",
+           stats_value[VRRP_STATS_KEY_V3_TX],
+           stats_value[VRRP_STATS_KEY_MISMATCHED_ADDR_LIST_PKTS]+
+           stats_value[VRRP_STATS_KEY_MISMATCHED_AUTH_TYPE_PKTS]+
+           stats_value[VRRP_STATS_KEY_IP_ADDRESS_OWNER_CONFLICTS]+
+           stats_value[VRRP_STATS_KEY_ADVERTISE_INTERVAL_ERRORS]+
+           stats_value[VRRP_STATS_KEY_ADVERTISE_RECV_IN_INIT_STATE]+
+           stats_value[VRRP_STATS_KEY_INVALID_GROUP]+
+           stats_value[VRRP_STATS_KEY_OTHER_REASONS],
+           stats_value[VRRP_STATS_KEY_V3_RX],
+           VTY_NEWLINE);
+   vty_out(vty, "  VRRPv2 Advertisements: sent %"PRId64"(error %"PRId64") - rcvd %"PRId64"%s",
+           stats_value[VRRP_STATS_KEY_V2_TX],
+           stats_value[VRRP_STATS_KEY_V2_INCOMPATIBILITY]+
+           stats_value[VRRP_STATS_KEY_MISMATCHED_ADDR_LIST_PKTS]+
+           stats_value[VRRP_STATS_KEY_MISMATCHED_AUTH_TYPE_PKTS]+
+           stats_value[VRRP_STATS_KEY_IP_ADDRESS_OWNER_CONFLICTS]+
+           stats_value[VRRP_STATS_KEY_ADVERTISE_INTERVAL_ERRORS]+
+           stats_value[VRRP_STATS_KEY_ADVERTISE_RECV_IN_INIT_STATE]+
+           stats_value[VRRP_STATS_KEY_INVALID_GROUP]+
+           stats_value[VRRP_STATS_KEY_OTHER_REASONS],
+           stats_value[VRRP_STATS_KEY_V2_RX],
+           VTY_NEWLINE);
+   vty_out(vty, "  Group Discarded Packets: %"PRId64"%s",
+           stats_value[VRRP_STATS_KEY_V2_INCOMPATIBILITY]+
+           stats_value[VRRP_STATS_KEY_MISMATCHED_ADDR_LIST_PKTS]+
+           stats_value[VRRP_STATS_KEY_MISMATCHED_AUTH_TYPE_PKTS]+
+           stats_value[VRRP_STATS_KEY_IP_ADDRESS_OWNER_CONFLICTS]+
+           stats_value[VRRP_STATS_KEY_ADVERTISE_INTERVAL_ERRORS]+
+           stats_value[VRRP_STATS_KEY_ADVERTISE_RECV_IN_INIT_STATE]+
+           stats_value[VRRP_STATS_KEY_OTHER_REASONS],
+           VTY_NEWLINE);
+   vty_out(vty, "    IP address owner conflicts: %"PRId64"%s",
+           stats_value[VRRP_STATS_KEY_IP_ADDRESS_OWNER_CONFLICTS],
+           VTY_NEWLINE);
+   vty_out(vty, "    IP address configuration mismatch: %"PRId64"%s",
+           stats_value[VRRP_STATS_KEY_MISMATCHED_ADDR_LIST_PKTS],
+           VTY_NEWLINE);
+   vty_out(vty, "    Advert interval errors: %"PRId64"%s",
+           stats_value[VRRP_STATS_KEY_ADVERTISE_INTERVAL_ERRORS],
+           VTY_NEWLINE);
+   vty_out(vty, "    Adverts received in Init state: %"PRId64"%s",
+           stats_value[VRRP_STATS_KEY_ADVERTISE_RECV_IN_INIT_STATE],
+           VTY_NEWLINE);
+   vty_out(vty, "    Invalid group other reason:%"PRId64"%s",
+           stats_value[VRRP_STATS_KEY_OTHER_REASONS],
+           VTY_NEWLINE);
+
+   vty_out(vty, "  Group State transition:%s",VTY_NEWLINE);
+   if (init_to_master && (stats_value[VRRP_STATS_KEY_INIT_TO_MASTER] != 0))
+   {
+      vrrp_get_last_change_time(init_to_master, time_buf);
+      vty_out(vty, "    Init to master:%"PRId64" (%s)%s",
+              stats_value[VRRP_STATS_KEY_INIT_TO_MASTER],
+              time_buf,
+              VTY_NEWLINE);
+   }
+   else
+   {
+      vty_out(vty, "    Init to master:%"PRId64"%s",
+              stats_value[VRRP_STATS_KEY_INIT_TO_MASTER],
+              VTY_NEWLINE);
+   }
+
+   if (init_to_backup && (stats_value[VRRP_STATS_KEY_INIT_TO_BACKUP] != 0))
+   {
+      vrrp_get_last_change_time(init_to_backup, time_buf);
+      vty_out(vty, "    Init to backup:%"PRId64" (%s)%s",
+              stats_value[VRRP_STATS_KEY_INIT_TO_BACKUP],
+              time_buf,
+              VTY_NEWLINE);
+   }
+   else
+   {
+      vty_out(vty, "    Init to backup:%"PRId64"%s",
+              stats_value[VRRP_STATS_KEY_INIT_TO_BACKUP],
+              VTY_NEWLINE);
+   }
+
+   if (backup_to_master && (stats_value[VRRP_STATS_KEY_BACKUP_TO_MASTER] != 0))
+   {
+      vrrp_get_last_change_time(backup_to_master, time_buf);
+      vty_out(vty, "    Backup to master:%"PRId64" (Last change %s UTC)%s",
+              stats_value[VRRP_STATS_KEY_BACKUP_TO_MASTER],
+              time_buf,
+              VTY_NEWLINE);
+   }
+   else
+   {
+      vty_out(vty, "    Backup to master:%"PRId64"%s",
+              stats_value[VRRP_STATS_KEY_BACKUP_TO_MASTER],
+              VTY_NEWLINE);
+   }
+
+   if (master_to_backup && (stats_value[VRRP_STATS_KEY_MASTER_TO_BACKUP] != 0))
+   {
+      vrrp_get_last_change_time(master_to_backup, time_buf);
+      vty_out(vty, "    Master to backup:%"PRId64" (%s)%s",
+              stats_value[VRRP_STATS_KEY_MASTER_TO_BACKUP],
+              time_buf,
+              VTY_NEWLINE);
+   }
+   else
+   {
+      vty_out(vty, "    Master to backup:%"PRId64"%s",
+              stats_value[VRRP_STATS_KEY_MASTER_TO_BACKUP],
+              VTY_NEWLINE);
+   }
+
+   if (master_to_init && (stats_value[VRRP_STATS_KEY_MASTER_TO_INIT] != 0))
+   {
+      vrrp_get_last_change_time(master_to_init, time_buf);
+      vty_out(vty, "    Master to init:%"PRId64" (%s)%s",
+              stats_value[VRRP_STATS_KEY_MASTER_TO_INIT],
+              time_buf,
+              VTY_NEWLINE);
+   }
+   else
+   {
+      vty_out(vty, "    Master to init:%"PRId64"%s",
+              stats_value[VRRP_STATS_KEY_MASTER_TO_INIT],
+              VTY_NEWLINE);
+   }
+
+   if (backup_to_init && (stats_value[VRRP_STATS_KEY_BACKUP_TO_INIT] != 0))
+   {
+      vrrp_get_last_change_time(backup_to_init, time_buf);
+      vty_out(vty, "    Backup to init:%"PRId64" (%s)%s",
+              stats_value[VRRP_STATS_KEY_BACKUP_TO_INIT],
+              time_buf,
+              VTY_NEWLINE);
+   }
+   else
+   {
+      vty_out(vty, "    Backup to init:%"PRId64"%s",
+              stats_value[VRRP_STATS_KEY_BACKUP_TO_INIT],
+              VTY_NEWLINE);
+   }
+
+   return CMD_SUCCESS;
+}
+
+/* Function to show detail information of a VRRP group for specific interface. */
+static int vrrp_show_detail_vr_group(const struct ovsrec_vrrp *vr_row,
+                                     const char *port_name,
+                                     int64_t vrid,
+                                     const char *addr_family)
+{
+   const struct ovsrec_vrrp_track_entity *track_row = NULL;
+   int j = 0;
+
+   /* Display information */
+   vrrp_show_intf(vr_row, port_name, vrid, addr_family);
+   for (j = 0; j < vr_row->n_track_entities; j++)
+   {
+      track_row = vr_row->track_entities[j];
+      vty_out(vty, "  Tracked object id is %" PRId64 " and state %s%s",
+              track_row->id, (track_row->status_up)?"Up":"Down", VTY_NEWLINE);
+   }
+
+   vrrp_show_stats_intf(vr_row, port_name, vrid, addr_family);
+   vty_out(vty, "%s", VTY_NEWLINE);
+   return CMD_SUCCESS;
+}
+
+/* Function to display state information
+   for "show vrrp statistics" and "show vrrp statistics interface" commands.
+ */
+static int vrrp_show_stats_intf_state(const struct ovsrec_vrrp *vr_row,
+                                      const char *port_name,
+                                      int64_t vrid,
+                                      const char *addr_family)
+{
+   const char *state = NULL, *state_duration = NULL;
+   int duration_time = 0;
+
+   state = smap_get(&vr_row->status, VRRP_STATUS_KEY_STATE);
+   state_duration = smap_get(&vr_row->status, VRRP_STATUS_KEY_STATE_DURATION);
+   if (state_duration)
+   {
+      duration_time = atoi(state_duration);
+   }
+
+   /* Display information */
+   vty_out(vty, "VRRP Statistics for interface %s - Group %" PRId64 " - Address-Family %s%s",
+           port_name, vrid, addr_family, VTY_NEWLINE);
+   vty_out(vty, "  State is %s%s",
+           (state)?state:"INIT (Interface Down)", VTY_NEWLINE);
+   vty_out(vty, "  State duration %d mins %2.3f secs%s",
+           (duration_time/60), (float)(duration_time%60), VTY_NEWLINE);
+
+   return CMD_SUCCESS;
+}
+
+DEFUN(cli_vrrp_show_vrrp_detail_func,
+      cli_vrrp_show_vrrp_detail_cmd,
+      "show vrrp detail",
+      SHOW_STR
+      "Shows all VRRP groups information\n"
+      "Shows detail information of all VRRP groups\n")
+{
+   const struct ovsrec_vrrp *vr_row = NULL;
+   const struct ovsrec_port *port_row = NULL;
+   int i = 0;
+
+   OVSREC_PORT_FOR_EACH(port_row, idl)
+   {
+      for (i = 0; i < port_row->n_virtual_ip4_routers; i++)
+      {
+         vr_row = port_row->value_virtual_ip4_routers[i];
+         vrrp_show_detail_vr_group(vr_row, port_row->name,
+                                   port_row->key_virtual_ip4_routers[i],
+                                   "IPv4");
+      }
+
+      for (i = 0; i < port_row->n_virtual_ip6_routers; i++)
+      {
+         vr_row = port_row->value_virtual_ip6_routers[i];
+         vrrp_show_detail_vr_group(vr_row, port_row->name,
+                                   port_row->key_virtual_ip6_routers[i],
+                                   "IPv6");
+      }
+   }
+   return CMD_SUCCESS;
+}
+
+DEFUN(cli_vrrp_show_vrrp_intf_func,
+      cli_vrrp_show_vrrp_intf_cmd,
+      "show vrrp interface IFNAME",
+      SHOW_STR
+      "Shows all VRRP groups information\n"
+      "Selects an interface to show VRRP groups information\n"
+      "Specifies interface's name\n")
+{
+   const struct ovsrec_vrrp *vr_row = NULL;
+   const struct ovsrec_port *port_row = NULL;
+   int i = 0;
+
+   port_row = vrrp_get_ovsrec_port_with_name(argv[0]);
+
+   for (i = 0; i < port_row->n_virtual_ip4_routers; i++)
+   {
+      vr_row = port_row->value_virtual_ip4_routers[i];
+      vrrp_show_intf(vr_row, port_row->name,
+                     port_row->key_virtual_ip4_routers[i],
+                     "IPv4");
+   }
+
+   for (i = 0; i < port_row->n_virtual_ip6_routers; i++)
+   {
+      vr_row = port_row->value_virtual_ip6_routers[i];
+      vrrp_show_intf(vr_row, port_row->name,
+                     port_row->key_virtual_ip6_routers[i],
+                     "IPv6");
+   }
+
+   return CMD_SUCCESS;
+}
+
+DEFUN(cli_vrrp_show_vrrp_stats_func,
+      cli_vrrp_show_vrrp_stats_cmd,
+      "show vrrp statistics",
+      SHOW_STR
+      "Shows all VRRP statistics information\n"
+      "Shows statistics information of all VRRP groups\n")
+{
+   const struct ovsrec_vrrp *vr_row = NULL;
+   const struct ovsrec_port *port_row = NULL;
+   int i = 0;
+
+   OVSREC_PORT_FOR_EACH(port_row, idl)
+   {
+      for (i = 0; i < port_row->n_virtual_ip4_routers; i++)
+      {
+         vr_row = port_row->value_virtual_ip4_routers[i];
+         vrrp_show_stats_intf_state(vr_row, port_row->name,
+                                    port_row->key_virtual_ip4_routers[i],
+                                    "IPv4");
+         vrrp_show_stats_intf(vr_row, port_row->name,
+                              port_row->key_virtual_ip4_routers[i],
+                              "IPv4");
+         vty_out(vty, "%s", VTY_NEWLINE);
+      }
+
+      for (i = 0; i < port_row->n_virtual_ip6_routers; i++)
+      {
+         vr_row = port_row->value_virtual_ip6_routers[i];
+         vrrp_show_stats_intf_state(vr_row, port_row->name,
+                                    port_row->key_virtual_ip6_routers[i],
+                                    "IPv6");
+         vrrp_show_stats_intf(vr_row, port_row->name,
+                              port_row->key_virtual_ip6_routers[i],
+                              "IPv6");
+         vty_out(vty, "%s", VTY_NEWLINE);
+      }
+   }
+   return CMD_SUCCESS;
+}
+
+DEFUN(cli_vrrp_show_vrrp_stats_intf_func,
+      cli_vrrp_show_vrrp_stats_intf_cmd,
+      "show vrrp statistics interface IFNAME",
+      SHOW_STR
+      "Shows all VRRP statistics information\n"
+      "Selects an interface to show VRRP groups information\n"
+      "Specifies interface's name\n")
+{
+   const struct ovsrec_vrrp *vr_row = NULL;
+   const struct ovsrec_port *port_row = NULL;
+   int i = 0;
+
+   port_row = vrrp_get_ovsrec_port_with_name(argv[0]);
+
+   for (i = 0; i < port_row->n_virtual_ip4_routers; i++)
+   {
+      vr_row = port_row->value_virtual_ip4_routers[i];
+      vrrp_show_stats_intf_state(vr_row, port_row->name,
+                                 port_row->key_virtual_ip4_routers[i],
+                                 "IPv4");
+      vrrp_show_stats_intf(vr_row, port_row->name,
+                           port_row->key_virtual_ip4_routers[i],
+                           "IPv4");
+      vty_out(vty, "%s", VTY_NEWLINE);
+   }
+
+   for (i = 0; i < port_row->n_virtual_ip6_routers; i++)
+   {
+      vr_row = port_row->value_virtual_ip6_routers[i];
+      vrrp_show_stats_intf_state(vr_row, port_row->name,
+                                 port_row->key_virtual_ip6_routers[i],
+                                 "IPv6");
+      vrrp_show_stats_intf(vr_row, port_row->name,
+                           port_row->key_virtual_ip6_routers[i],
+                           "IPv6");
+      vty_out(vty, "%s", VTY_NEWLINE);
+   }
+   return CMD_SUCCESS;
+}
+
+DEFUN(cli_vrrp_show_track_func,
+      cli_vrrp_show_track_cmd,
+      "show track <1-500>",
+      SHOW_STR
+      "Shows track object information\n"
+      "Specifies track object number\n")
+{
+   const struct ovsrec_vrrp_track_entity *track_row = NULL;
+   int64_t track_id = (int64_t) atoi(argv[0]);
+
+   OVSREC_VRRP_TRACK_ENTITY_FOR_EACH(track_row, idl)
+   {
+      if (track_row->id == track_id)
+      {
+         vty_out(vty, "Track %" PRId64 "%s",
+                 track_row->id, VTY_NEWLINE);
+         vty_out(vty, "  Interface %s%s",
+                 track_row->track_port->name, VTY_NEWLINE);
+         vty_out(vty, "  Interface is %s%s",
+                 (track_row->status_up)?"UP":"DOWN", VTY_NEWLINE);
+      }
+   }
+   return CMD_SUCCESS;
+}
+
 /*
  * Function: vrrp_ovsdb_init
  * Responsibility : Add tables/columns needed for VRRP config commands.
@@ -2457,6 +3319,7 @@ static void vrrp_ovsdb_init()
    ovsdb_idl_add_column(idl, &ovsrec_vrrp_col_status);
    ovsdb_idl_add_column(idl, &ovsrec_vrrp_col_virtual_mac);
    ovsdb_idl_add_column(idl, &ovsrec_vrrp_col_track_entities);
+   ovsdb_idl_add_column(idl, &ovsrec_vrrp_col_statistics);
 
    ovsdb_idl_add_table(idl, &ovsrec_table_vrrp_track_entity);
    ovsdb_idl_add_column(idl, &ovsrec_vrrp_track_entity_col_track_port);
@@ -2471,7 +3334,6 @@ static void vrrp_ovsdb_init()
  */
 void cli_pre_init(void)
 {
-
   /* Install VRRP interface node*/
   install_node(&vrrp_if_node, NULL);
   vtysh_install_default(VRRP_IF_NODE);
@@ -2499,8 +3361,18 @@ void cli_post_init(void)
    install_element(VRRP_IF_NODE, &cli_vrrp_no_timers_cmd);
    install_element(VRRP_IF_NODE, &cli_vrrp_shutdown_cmd);
    install_element(VRRP_IF_NODE, &cli_vrrp_no_shutdown_cmd);
+   install_element(VRRP_IF_NODE, &cli_track_vr_group_cmd);
+   install_element(VRRP_IF_NODE, &cli_no_track_vr_group_cmd);
+   install_element(CONFIG_NODE, &cli_track_intf_cmd);
+   install_element(CONFIG_NODE, &cli_no_track_cmd);
    install_element(VRRP_IF_NODE, &cli_vrrp_exit_vrrp_if_mode_cmd);
+
    install_element(ENABLE_NODE, &cli_vrrp_show_vrrp_cmd);
    install_element(ENABLE_NODE, &cli_vrrp_show_vrrp_brief_cmd);
+   install_element(ENABLE_NODE, &cli_vrrp_show_vrrp_detail_cmd);
+   install_element(ENABLE_NODE, &cli_vrrp_show_vrrp_intf_cmd);
+   install_element(ENABLE_NODE, &cli_vrrp_show_vrrp_stats_cmd);
+   install_element(ENABLE_NODE, &cli_vrrp_show_vrrp_stats_intf_cmd);
+   install_element(ENABLE_NODE, &cli_vrrp_show_track_cmd);
    return;
 }
