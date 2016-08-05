@@ -1,0 +1,9 @@
+Code-Review+2: Ankit Kumar Sinha <ankit.sinha@hpe.com>
+Verified+2: Ankit Kumar Sinha <ankit.sinha@hpe.com>
+Verified+1: chenkelly <kelly_chen@accton.com.tw>
+Workflow+1: chenkelly <kelly_chen@accton.com.tw>
+Submitted-by: chenkelly <kelly_chen@accton.com.tw>
+Submitted-at: Fri, 05 Aug 2016 00:28:10 +0000
+Reviewed-on: https://review.openswitch.net/12617
+Project: openswitch/ops-vrrpd
+Branch: refs/heads/feature/vrrp
